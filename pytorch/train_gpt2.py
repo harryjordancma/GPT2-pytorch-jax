@@ -3,13 +3,53 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+class CausalSelfAttention(nn.module):
+
+    def __init__(self, config):
+        super().__init__()
+        assert config.n_embd % config.n_head == 0
+
+        # key, query and value projections for all heads but in a batch
+        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
+        
+        # Output projection
+        self.c_proj = nn.Linear(config.n_embd, config.n_embd)
+        
+        # regularization
+        self.n_head = config.n_head
+        self.n_embd = config.n_embd
+
+        # Adding a mask (called a bias in the OpenAI/HF naming though
+        self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
+                             .view(1, 1, config.block_size, config.block_size))
+
+    def forward(self, x ):
+        """
+        Method of the self attention
+        """
+        B, T, C = x.size()
+        qkv = self.c_attn(x)
+        q, k, v = self.c_attn(x)
+
+        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+
+        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+        att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float("-inf"))
+        att = F.softmax(att, dim=-1)
+        y = att @ v
+        
+        
+        
+
 class MLP(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd)
+        self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd) # Expand dimension
         self.gelu = nn.GELU(approximate = "tanh")
-        self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd)
+        self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd) # reduce dimension
 
     def forward(self, x):
         x = self.c_fc(x)
@@ -26,6 +66,7 @@ class Block(nn.module):
         self.mlp = MLP(config)
 
     def forward(self, x):
+        # The forward method controls the flow through the neural network
         x = x + self.attn(self.ln_1(x))
         x = x + self.mlp(self.ln_2(x))
         return x

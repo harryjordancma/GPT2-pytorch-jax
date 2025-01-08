@@ -127,6 +127,28 @@ class GPT(nn.Module):
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
+    def forward(self, token_idx):
+        # token_idx is of shape (B, T)
+        # B for Batch dimension. Batch dimension represents the number of samples (or sequences) processed simultaneously.
+        # T for time dimension. Represents the sequence length or the number of time steps in each sample.
+        B, T = token_idx.size()
+        assert T <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
+        # forward the token and position embeddings
+        # torch.arange is a function in PyTorch that generates a 1-dimensional tensor (array) with values ranging from a start value to an end value
+        pos = torch.arange(0, t, dtype=torch.long, device=token_idx.device) # shape (T)
+        pos_emb = self.transformer.wpe(pos) # position embeddings of shape (T, n_embd)
+        tok_emb = self.transformer.wte(token_idx) # token embeddings of shape(B, T, n_embd)
+        x = tok_emb + pos_emb
+
+        # forward blocks of the transformer
+        for block in self.transformer.h:
+            x = block(x)
+
+        # forward the final layernorm and the classifier
+        x = self.transformer.ln_f(x)
+        # calculate the logits of what comes next (B, T+1) out of vocab_size amount of tokens
+        logits =  self.lm_head(x) # (B, T, vocab_size)
+
     @classmethod
     def from_pretrained(cls, model_type):
         """

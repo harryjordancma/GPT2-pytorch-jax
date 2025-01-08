@@ -142,12 +142,13 @@ class GPT(nn.Module):
 
         # forward blocks of the transformer
         for block in self.transformer.h:
+            # The nn.Module class defines a __call__ method, which is automatically invoked when you treat an instance of the class like a function (e.g., block(x)).
             x = block(x)
 
         # forward the final layernorm and the classifier
         x = self.transformer.ln_f(x)
-        # calculate the logits of what comes next (B, T+1) out of vocab_size amount of tokens
-        logits =  self.lm_head(x) # (B, T, vocab_size)
+        # calculate the logits of what comes next (B, T + 1) out of vocab_size amount of tokens
+        logits = self.lm_head(x) # (B, T, vocab_size)
 
     @classmethod
     def from_pretrained(cls, model_type):
@@ -203,8 +204,39 @@ class GPT(nn.Module):
 
         return model
 
-model = GPT.from_pretrained("gpt2")
-print("didnt crash yay!")
+# --------------------------------------------------------------------------------
+
+num_return_sequences = 5
+max_length = 30
+
+model = GPT.from_pretrained('gpt2')
+model.eval()
+model.to('cuda')
+
+# prefix tokens
+import tiktoken
+# tokenize input and convert to pytorch tensor
+enc = tiktoken.get_encoding("gpt2")
+tokens = enc.encode("Hello, I'm a language model,")
+tokens = torch.tensor(tokens, dtype=torch.long) # (8,)
+# add batch dimension as we expect to have a batch dimension then repeat it
+tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1) # (5, 8)
+x = tokens.to('cuda')
+
+# We have 5 batches of sequences that have a lenght of (B=5, T=8)
+while x.size(1) < max_length:
+    # forward the model to get the logits
+    with torch.no_grad():
+        # get logits
+        logits = model(x) # (B, T, vocab_size)
+        # get the last logits
+        logits = logits[:, -1, :] # (B, vocab_size)
+        # get probabilities
+        probs = F.softmax(logits, dim=-1)
+
+        # do top_k sampling
+        topk_probs, topk_indices = torch.topk
+    
 
 
 

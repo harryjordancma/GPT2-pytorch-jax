@@ -7,15 +7,15 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.16.4
 #   kernelspec:
-#     display_name: Python 3.11 Transformers
+#     display_name: Python 3.11
 #     language: python
-#     name: py311_transformers
+#     name: py311
 # ---
 
 # %%
 from transformers import GPT2LMHeadModel
 
-# %% jupyter={"outputs_hidden": true}
+# %%
 model_hf = GPT2LMHeadModel.from_pretrained("gpt2") # 124M
 sd_hf = model_hf.state_dict()
 

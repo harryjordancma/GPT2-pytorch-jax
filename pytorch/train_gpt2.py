@@ -1,6 +1,8 @@
-from dataclasses import dataclass
+import math
+import tiktoken
 import torch
 import torch.nn as nn
+from dataclasses import dataclass
 from torch.nn import functional as F
 
 from transformers import GPT2LMHeadModel
@@ -132,10 +134,10 @@ class GPT(nn.Module):
         # B for Batch dimension. Batch dimension represents the number of samples (or sequences) processed simultaneously.
         # T for time dimension. Represents the sequence length or the number of time steps in each sample.
         B, T = token_idx.size()
-        assert T <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
+        assert T <= self.config.block_size, f"Cannot forward sequence of length {T}, block size is only {self.config.block_size}"
         # forward the token and position embeddings
         # torch.arange is a function in PyTorch that generates a 1-dimensional tensor (array) with values ranging from a start value to an end value
-        pos = torch.arange(0, t, dtype=torch.long, device=token_idx.device) # shape (T)
+        pos = torch.arange(0, T, dtype=torch.long, device=token_idx.device) # shape (T)
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (T, n_embd)
         tok_emb = self.transformer.wte(token_idx) # token embeddings of shape(B, T, n_embd)
         x = tok_emb + pos_emb
@@ -211,17 +213,16 @@ max_length = 30
 
 model = GPT.from_pretrained('gpt2')
 model.eval()
-model.to('cuda')
+model.to('mps')
 
 # prefix tokens
-import tiktoken
 # tokenize input and convert to pytorch tensor
 enc = tiktoken.get_encoding("gpt2")
 tokens = enc.encode("Hello, I'm a language model,")
 tokens = torch.tensor(tokens, dtype=torch.long) # (8,)
 # add batch dimension as we expect to have a batch dimension then repeat it
 tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1) # (5, 8)
-x = tokens.to('cuda')
+x = tokens.to('mps')
 
 # We have 5 batches of sequences that have a lenght of (B=5, T=8)
 while x.size(1) < max_length:

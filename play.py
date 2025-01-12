@@ -16,7 +16,7 @@
 from transformers import GPT2LMHeadModel
 
 # %%
-model_hf = GPT2LMHeadModel.from_pretrained("gpt2") # 124M
+model_hf = GPT2LMHeadModel.from_pretrained("gpt2")  # 124M
 sd_hf = model_hf.state_dict()
 
 for k, v in sd_hf.items():
@@ -35,10 +35,11 @@ plt.xlabel("embedding dimension")
 plt.ylabel("weights")
 
 # %%
-plt.imshow(sd_hf["transformer.h.1.attn.c_attn.weight"][:300,:300], cmap="gray")
+plt.imshow(sd_hf["transformer.h.1.attn.c_attn.weight"][:300, :300], cmap="gray")
 
 # %%
 from transformers import pipeline, set_seed
+
 generator = pipeline("text-generation", model="gpt2")
 
 set_seed(42)

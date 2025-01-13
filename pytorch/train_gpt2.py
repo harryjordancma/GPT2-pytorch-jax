@@ -168,6 +168,10 @@ class GPT(nn.Module):
         x = self.transformer.ln_f(x)
         # calculate the logits of what comes next (B, T + 1) out of vocab_size amount of tokens
         logits = self.lm_head(x)  # (B, T, vocab_size)
+        loss = None
+        if targets is not None: 
+            # flattening the tensor
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
         return logits
 
     @classmethod
@@ -246,12 +250,26 @@ elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
     device = "mps"
 print(f"using device: {device}")
 
+# make a data batch
+enc = tiktoken.get_encoding("gpt2")
+with open("../input.txt", "r") as file:
+    text = file.read()
+text = text[:1000]
+tokens = enc.encode(text)
+B, T = 4, 32 
+buf = torch.tensor(tokens[:24 + 1]) # +1 for label tensor
+x = buf[:-1].view(4, 6) # Create inputs to transformer
+y = buf[1:].view(4, 6) # Create labels tensor
+
+# get logits
+model = GPT(GPTConfig())
+model.to(device)
+logits, loss = model(x, y)
+
+import sys; sys.exit(0)
+
 num_return_sequences = 5
 max_length = 30
-
-model = GPT(GPTConfig())
-model.eval()
-model.to("mps")
 
 # prefix tokens
 # tokenize input and convert to pytorch tensor
@@ -260,7 +278,7 @@ tokens = enc.encode("Hello, I'm a language model,")
 tokens = torch.tensor(tokens, dtype=torch.long)  # (8,)
 # add batch dimension as we expect to have a batch dimension then repeat it
 tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1)  # (5, 8)
-x = tokens.to("mps")
+x = tokens.to(device)
 
 # We have 5 batches of sequences that have a lenght of (B=5, T=8)
 while x.size(1) < max_length:

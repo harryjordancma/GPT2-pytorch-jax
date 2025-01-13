@@ -46,3 +46,44 @@ set_seed(42)
 generator("Hello, I'm a large language model", max_length=30, num_return_sequences=5)
 
 # %%
+# !wget https://github.com/karpathy/char-rnn/blob/master/data/tinyshakespeare/input.txt
+
+# %%
+import requests
+
+url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
+
+response = requests.get(url)
+
+if response.status_code == 200:
+
+    with open("input.txt", "w", encoding="utf-8") as file:
+        file.write(response.text)
+    print("Shakespeare data saved!")
+else:
+    print(f"Failed to download the file. Status code: {response.status_code}")
+
+# %%
+with open("input.txt", "r") as file:
+    text = file.read()
+data = text[:1000]
+print(data[:100])
+
+# %%
+import tiktoken
+enc = tiktoken.get_encoding("gpt2")
+tokens = enc.encode(data)
+print(tokens[:24])
+
+# %% [markdown]
+# We want to get the shakespeare data into the format of (B, T). i.e. batches of sequences of tokens.
+
+# %%
+import torch
+buf = torch.tensor(tokens[:24 + 1]) # +1 for label tensor
+x = buf[:-1].view(4, 6) # Create inputs to transformer
+y = buf[1:].view(4, 6) # Create labels tensor
+print(x)
+print(y)
+
+# %%

@@ -238,10 +238,18 @@ class GPT(nn.Module):
 
 # --------------------------------------------------------------------------------
 
+# attempt to detect device
+device = "cpu"
+if torch.cuda.is_available():
+    device = "cuda"
+elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    device = "mps"
+print(f"using device: {device}")
+
 num_return_sequences = 5
 max_length = 30
 
-model = GPT.from_pretrained("gpt2")
+model = GPT(GPTConfig())
 model.eval()
 model.to("mps")
 
@@ -273,4 +281,7 @@ while x.size(1) < max_length:
         # append to the sequence
         x = torch.cat((x, xcol), dim=1)
 
-
+for i in range(num_return_sequences):
+    tokens = x[i, :max_length].tolist()
+    decoded = enc.decode(tokens)
+    print(">", decoded)

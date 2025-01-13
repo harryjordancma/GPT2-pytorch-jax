@@ -238,7 +238,30 @@ class GPT(nn.Module):
                     sd[k].copy_(sd_hf[k])
 
         return model
+# -------------------------------------------------------------------------------
 
+class DataLoader:
+    def __init__(self, B, T):
+        self.B = B
+        self.T = T
+
+        # loads tokens from disk and store them in memory
+        with open("../input.txt", r) as f:
+            text = f.read()
+
+        enc = tiktoken.get_encoding("gpt2")
+        tokens = enc.encode(text)
+        self.tokens = torch.tensor(tokens)
+        print(f"Loaded {len(self.tokens)} tokens")
+        print(f"1 epoch = {len(self.tokens) // (B * T)} batches")
+
+        # state
+        self.current_postion = 0
+
+    def next_batch(self):
+        B, T = self.B, self.T
+
+        buf = self.tokens()
 
 # --------------------------------------------------------------------------------
 

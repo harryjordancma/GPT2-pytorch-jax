@@ -142,7 +142,7 @@ class GPT(nn.Module):
         )
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
-    def forward(self, token_idx):
+    def forward(self, token_idx, targets=None):
         # token_idx is of shape (B, T)
         # B for Batch dimension. Batch dimension represents the number of samples (or sequences) processed simultaneously.
         # T for time dimension. Represents the sequence length or the number of time steps in each sample.
@@ -172,7 +172,7 @@ class GPT(nn.Module):
         if targets is not None: 
             # flattening the tensor
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
-        return logits
+        return logits, loss
 
     @classmethod
     def from_pretrained(cls, model_type):
@@ -258,13 +258,26 @@ text = text[:1000]
 tokens = enc.encode(text)
 B, T = 4, 32 
 buf = torch.tensor(tokens[:24 + 1]) # +1 for label tensor
+#tensors arent stateful (cant do model.to(device))
+buf = buf.to(device)
 x = buf[:-1].view(4, 6) # Create inputs to transformer
 y = buf[1:].view(4, 6) # Create labels tensor
 
 # get logits
 model = GPT(GPTConfig())
 model.to(device)
-logits, loss = model(x, y)
+# logits, loss = model(x, y)
+
+# optimizing
+# lr=3e-4 is good for debugging
+optimizer = torch.optim.AdamW(model.parameters(),  lr=3e-4)
+for i in range(50):
+    # always start with a zero gradient
+    optimizer.zero_grad()
+    logits, loss = model(x, y)
+    loss.backward() # accumulates gradient
+    optimizer.step()
+    print(f"step {i}, loss: {loss.item()}")
 
 import sys; sys.exit(0)
 

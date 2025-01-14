@@ -87,3 +87,14 @@ print(x)
 print(y)
 
 # %%
+print(sd_hf["lm_head.weight"].shape)
+print(sd_hf["transformer.wte.weight"].shape)
+
+# %%
+(sd_hf["lm_head.weight"] == sd_hf["transformer.wte.weight"]).all()
+
+# %%
+print(sd_hf["lm_head.weight"].data_ptr())
+print(sd_hf["transformer.wte.weight"].data_ptr())
+
+# %%

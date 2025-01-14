@@ -141,6 +141,12 @@ class GPT(nn.Module):
             )
         )
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        
+        # weight sharing scheme, use in both the beginning and end of the model.
+        # We expect similar tokens to be close to eachother in the embedding space,
+        # therefore the probability at the end of the transformer should be similar. 
+        # Also we are neing 30% more efficient! (saving 30% of parameterr)
+        self.transformer.wte.weight = self.lm_head.weight
 
     def forward(self, token_idx, targets=None):
         # token_idx is of shape (B, T)
@@ -246,7 +252,7 @@ class DataLoader:
         self.T = T
 
         # loads tokens from disk and store them in memory
-        with open("../input.txt", r) as f:
+        with open("../input.txt", "r") as f:
             text = f.read()
 
         enc = tiktoken.get_encoding("gpt2")
@@ -256,12 +262,22 @@ class DataLoader:
         print(f"1 epoch = {len(self.tokens) // (B * T)} batches")
 
         # state
-        self.current_postion = 0
+        self.current_position = 0
 
     def next_batch(self):
         B, T = self.B, self.T
+        buf = self.tokens[self.current_position : self.current_position+B*T+1]
+        x = (buf[:-1]).view(B, T) # inputs 
+        y = (buf[1:]).view(B, T)  # targets
+        # advance the posiiton by B * T 
+        self.current_position += B * T
 
-        buf = self.tokens()
+        # check if out of bounds, if so, reset it
+        # +1 is used as it means we always have a label token
+        if self.current_position + (B * T + 1) > len(self.tokens):
+            self.current_position = 0
+        return x, y
+        
 
 # --------------------------------------------------------------------------------
 
@@ -273,28 +289,20 @@ elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
     device = "mps"
 print(f"using device: {device}")
 
-# make a data batch
-enc = tiktoken.get_encoding("gpt2")
-with open("../input.txt", "r") as file:
-    text = file.read()
-text = text[:1000]
-tokens = enc.encode(text)
-B, T = 4, 32 
-buf = torch.tensor(tokens[:24 + 1]) # +1 for label tensor
-#tensors arent stateful (cant do model.to(device))
-buf = buf.to(device)
-x = buf[:-1].view(4, 6) # Create inputs to transformer
-y = buf[1:].view(4, 6) # Create labels tensor
+train_loader = DataLoader(B=4, T=32)
 
 # get logits
 model = GPT(GPTConfig())
 model.to(device)
-# logits, loss = model(x, y)
 
 # optimizing
 # lr=3e-4 is good for debugging
 optimizer = torch.optim.AdamW(model.parameters(),  lr=3e-4)
 for i in range(50):
+    # Create batch
+    x, y = train_loader.next_batch()
+    x, y = x.to(device), y.to(device)
+    
     # always start with a zero gradient
     optimizer.zero_grad()
     logits, loss = model(x, y)

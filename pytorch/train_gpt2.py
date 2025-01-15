@@ -309,7 +309,10 @@ elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
     device = "mps"
 print(f"using device: {device}")
 
-train_loader = DataLoader(B=16, T=1024)
+train_loader = DataLoader(B=8, T=1024)
+
+# high = tf_32, setting all matrix multipication to utlize tf32 precision
+torch.set_float32_matmul_precision("high")
 
 # get logits
 model = GPT(GPTConfig())
@@ -326,7 +329,10 @@ for i in range(50):
     
     # always start with a zero gradient
     optimizer.zero_grad()
-    logits, loss = model(x, y)
+    # cast some operations to BF16, otherwise in FP32, as some operations are effected more.
+    with torch.autocast(device_type=device, dtype=torch.bfloat16):
+        logits, loss = model(x, y)
+        
     loss.backward() # accumulates gradient
     optimizer.step()
 

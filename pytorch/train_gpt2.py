@@ -317,6 +317,7 @@ torch.set_float32_matmul_precision("high")
 # get logits
 model = GPT(GPTConfig())
 model.to(device)
+model = torch.compile(model)
 
 # optimizing
 # lr=3e-4 is good for debugging

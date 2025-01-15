@@ -97,4 +97,13 @@ print(sd_hf["transformer.wte.weight"].shape)
 print(sd_hf["lm_head.weight"].data_ptr())
 print(sd_hf["transformer.wte.weight"].data_ptr())
 
+# %% jupyter={"source_hidden": true}
+# standard deviation grows inside the residual stream
+# scale dow c_proj
+x = torch.zeros(768)
+n = 100
+for i in range(n):
+    x += n**-0.5 * torch.randn(768)
+print(x.std())
+
 # %%

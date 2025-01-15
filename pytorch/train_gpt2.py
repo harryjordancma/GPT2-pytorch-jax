@@ -19,12 +19,13 @@ class CausalSelfAttention(nn.Module):
 
         # Output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd)
+        self.c_proj.NANOGPT_SCALE_INIT = 1
 
         # regularization
         self.n_head = config.n_head
         self.n_embd = config.n_embd
 
-        # Adding a mask (called a bias in the OpenAI/HF naming though
+        # Adding a mask (called a bias in the OpenAI/HF naming though)
         # .register_buffer: registers the mask as a buffer, so its not treated as a trainable parameter
         # torch.ones: create tensor of ones
         # torch.trill: apply a lower triangle operation
@@ -147,6 +148,24 @@ class GPT(nn.Module):
         # therefore the probability at the end of the transformer should be similar. 
         # Also we are neing 30% more efficient! (saving 30% of parameterr)
         self.transformer.wte.weight = self.lm_head.weight
+
+        # init params
+        self.apply(self._init_weights)
+
+    
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            # initialise linear layers 
+            std = 0.02
+            if hasattr(module, 'NANOGPT_SCALE_INIT'):
+                std *= (2 * self.config.n_layer) ** -0.5   
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                # set bias to zero
+                torch.nn.init.zeros_(module.bias)
+            elif isinstance(module, nn.Embedding):
+                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
     def forward(self, token_idx, targets=None):
         # token_idx is of shape (B, T)
@@ -280,6 +299,7 @@ class DataLoader:
         
 
 # --------------------------------------------------------------------------------
+import time
 
 # attempt to detect device
 device = "cpu"
@@ -289,7 +309,7 @@ elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
     device = "mps"
 print(f"using device: {device}")
 
-train_loader = DataLoader(B=4, T=32)
+train_loader = DataLoader(B=16, T=1024)
 
 # get logits
 model = GPT(GPTConfig())
@@ -299,6 +319,7 @@ model.to(device)
 # lr=3e-4 is good for debugging
 optimizer = torch.optim.AdamW(model.parameters(),  lr=3e-4)
 for i in range(50):
+    t0 = time.time()
     # Create batch
     x, y = train_loader.next_batch()
     x, y = x.to(device), y.to(device)
@@ -308,7 +329,12 @@ for i in range(50):
     logits, loss = model(x, y)
     loss.backward() # accumulates gradient
     optimizer.step()
-    print(f"step {i}, loss: {loss.item()}")
+
+    # wait for all the work to finish.
+    torch.cuda.synchronize()
+    t1 = time.time()
+    dt = (t1 - t0)*1000
+    print(f"step {i}, loss: {loss.item()}, dt: {dt:.2f}ms")
 
 import sys; sys.exit(0)
 

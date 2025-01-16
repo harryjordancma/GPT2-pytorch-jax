@@ -66,15 +66,19 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
 
-        # Operations
-        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+        # # Operations
+        # att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
 
-        # Autoreggrssive mask, assures causal self attention
-        att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float("-inf"))
+        # # Autoreggrssive mask, assures causal self attention
+        # att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float("-inf"))
 
-        # Make sure it sums to one
-        att = F.softmax(att, dim=-1)
-        y = att @ v
+        # # Make sure it sums to one
+        # att = F.softmax(att, dim=-1)
+        # y = att @ v
+        
+        # flash attention 
+        y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        
         y = y.transpose(1, 2).contiguous().view(B, T, C)
 
         y = self.c_proj(y)
@@ -215,7 +219,7 @@ class GPT(nn.Module):
             "gpt2-xl": dict(n_layer=48, n_head=25, n_embd=1600),  # 1558M
         }[model_type]
         # GPT standard params
-        config_args["vocab_size"] = 50257
+        config_args["vocab_size"] = 50304 # prettier number that 50257 (more powers of 2 fit in it)
         config_args["block_size"] = 1024
 
         config = GPTConfig(**config_args)
@@ -319,10 +323,32 @@ model = GPT(GPTConfig())
 model.to(device)
 model = torch.compile(model)
 
+max_lr = 3e-4
+min_lr = max_lr * 0.1
+warm_up_steps = 10
+max_steps = 50
+
+# cosine learning rate 
+def get_lr(it):
+    # initialy start with linear warmup
+    if it < warm_up_steps:
+        return max_lr * (it+1) / warm_up_steps
+    # if it > decay iters, return min_lr
+    if it > max_steps:
+        return min_lr
+    # in between, use cosine decay down to min learning rate
+    decay_ratio = (it - warm_up_steps) / (max_steps - warm_up_steps)
+    assert 0 <= decay_ratio <= 1
+    coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+    
+    return min_lr + coeff * (max_lr - min_lr)
+
+    
+
 # optimizing
 # lr=3e-4 is good for debugging
-optimizer = torch.optim.AdamW(model.parameters(),  lr=3e-4)
-for i in range(50):
+optimizer = torch.optim.AdamW(model.parameters(),  lr=3e-4, betas=(0.9, 0.95), eps=1e-8)
+for step in range(max_steps):
     t0 = time.time()
     # Create batch
     x, y = train_loader.next_batch()
@@ -333,15 +359,22 @@ for i in range(50):
     # cast some operations to BF16, otherwise in FP32, as some operations are effected more.
     with torch.autocast(device_type=device, dtype=torch.bfloat16):
         logits, loss = model(x, y)
-        
     loss.backward() # accumulates gradient
+    norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # stop model shock, limit gradient to 1.0.
+    lr = get_lr(step)
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
     optimizer.step()
 
     # wait for all the work to finish.
     torch.cuda.synchronize()
     t1 = time.time()
     dt = (t1 - t0)*1000
-    print(f"step {i}, loss: {loss.item()}, dt: {dt:.2f}ms")
+
+    # token count
+    tokens_processed = train_loader.B * train_loader.T
+    tokens_per_sec = tokens_processed / dt
+    print(f"step {step} | loss: {loss.item():.6f} | norm: {norm:.4f} | dt: {dt:.2f}ms | tok/sec: {tokens_per_sec:.2f}")
 
 import sys; sys.exit(0)
 

@@ -267,6 +267,37 @@ class GPT(nn.Module):
                     sd[k].copy_(sd_hf[k])
 
         return model
+    
+    def configure_optimizers(self, weight_decay, learning_rate, device):
+        # start with all of the candidate parameters that require grad.
+        param_dict = {pn: p for pn, p in self.named_parameters()}
+        param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
+
+        decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
+        nodecay_params = [p for n, p in param_dict.items() if p.dim() < 2]
+        optim_groups = [
+            {"params": decay_params, "weight_decay": weight_decay},
+            {"params": nodecay_params, "weight_decay": 0.0}
+        ]
+        num_decay_params = sum(p.numel() for p in decay_params)
+        num_nodecay_params = sum(p.numel() for p in nodecay_params)
+        print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,}  parameters")
+        print(f"num non-decayed parameter tensors: {len(num_nodecay_params)}, with {num_nodecay_params:,}  parameters")
+        # Create AdamW optimizer and use the fused version if it is available
+        fused_available = False
+
+        # python 3.12 hack, kernel fussion for AdamW
+        try:
+            torch.optim.AdamW([], fused=True)  # Test with an empty parameter list
+            fused_available = True
+        except TypeError:
+            fused_available = False
+        used_fused = fused_available and "cuda" in device
+        print(f"using fused AdamW: {used_fused}")
+        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8, fused=used_fused)
+        return optimizer
+
+
 # -------------------------------------------------------------------------------
 
 class DataLoader:
@@ -347,7 +378,8 @@ def get_lr(it):
 
 # optimizing
 # lr=3e-4 is good for debugging
-optimizer = torch.optim.AdamW(model.parameters(),  lr=3e-4, betas=(0.9, 0.95), eps=1e-8)
+optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device)
+
 for step in range(max_steps):
     t0 = time.time()
     # Create batch

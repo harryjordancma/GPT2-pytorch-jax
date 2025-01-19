@@ -1,6 +1,7 @@
 import math
 import tiktoken
 import torch
+import sys
 import torch.nn as nn
 from dataclasses import dataclass
 from torch.nn import functional as F
@@ -337,21 +338,56 @@ class DataLoader:
 # --------------------------------------------------------------------------------
 import time
 
-# attempt to detect device
-device = "cpu"
+from torch.distributed import init_process_group, destroy_process_group
+
+# setup DDP
+ddp = int(os.environ.get("RANK", -1)) != -1 # check if ddp run
+if ddp:
+    asser torch.cuda.is_available()
+    init_process_group(backed="nccl")
+    ddp_rank = int(os.environ["RANK"])
+    ddp_local_rank = int(os.environ["LOCAL_RANK"])
+    ddp_world_size= int(os.environ["WORLD_SIZE"])
+    # make sure to use the approiate gpu
+    device = f"cuda: {ddp_local_rank}"
+    torch.cuda.set_device(device)
+    # make sure master_process is at 0
+    master_process = ddp_rank ==0 # wil do logging and checkpointing
+else:
+    # else return to single GPU training
+    ddp_rank = 0
+    ddp_local_rank = 0
+    ddp_world_size = 1
+    master_process = True
+
+    # attempt to autodetect device
+    device = "cpu"
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        device = "mps"
+    print(f"using device: {device}")
+
+torch.manual_seed(1337)
 if torch.cuda.is_available():
-    device = "cuda"
-elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-    device = "mps"
-print(f"using device: {device}")
+    torch.cuda.manual_seed(1337)
+
+# attempt to autodetect device
+device_type = "cuda" if device.startswith("cuda") else "cpu"
 
 total_batch_size = 524288 # 2**19, roughly 0.5 M of tokens
 B = 16 # micro batch size
-T = 1024 # sequence length
-assert total_batch_size // (B * T) # make sure you can divide the total_batch_size by B*T
-grad_accum_steps = total_batch_size // (B * T)
-print(f"total desired batch size: {total_batch_size}")
-print(f"=> calculated gradient accumation steps: {grad_accum_steps}")
+T = 1024 # sequence 
+
+assert total_batch_size // (B * T * ddp_world_size) == 0 # make sure you can divide the total_batch_size by B*T*ddp_world_size
+grad_accum_steps = total_batch_size // (B * T * ddp_world_size) 
+if master_process:
+    print(f"total desired batch size: {total_batch_size}")
+    print(f"=> calculated gradient accumation steps: {grad_accum_steps}")
+
+print(f"I am GPU {ddp_rank}")
+print("bye")
+sys.exit(0)
 
 train_loader = DataLoader(B=8, T=1024)
 

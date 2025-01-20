@@ -1,4 +1,5 @@
 import math
+import os
 import tiktoken
 import torch
 import sys
@@ -337,19 +338,20 @@ class DataLoader:
 
 # --------------------------------------------------------------------------------
 import time
-
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
 
 # setup DDP
 ddp = int(os.environ.get("RANK", -1)) != -1 # check if ddp run
 if ddp:
-    asser torch.cuda.is_available()
-    init_process_group(backed="nccl")
+    assert torch.cuda.is_available()
+    init_process_group(backend="nccl")
     ddp_rank = int(os.environ["RANK"])
     ddp_local_rank = int(os.environ["LOCAL_RANK"])
     ddp_world_size= int(os.environ["WORLD_SIZE"])
     # make sure to use the approiate gpu
-    device = f"cuda: {ddp_local_rank}"
+    device = f"cuda:{ddp_local_rank}"
     torch.cuda.set_device(device)
     # make sure master_process is at 0
     master_process = ddp_rank ==0 # wil do logging and checkpointing
@@ -376,18 +378,14 @@ if torch.cuda.is_available():
 device_type = "cuda" if device.startswith("cuda") else "cpu"
 
 total_batch_size = 524288 # 2**19, roughly 0.5 M of tokens
-B = 16 # micro batch size
+B = 4 # micro batch size
 T = 1024 # sequence 
 
-assert total_batch_size // (B * T * ddp_world_size) == 0 # make sure you can divide the total_batch_size by B*T*ddp_world_size
+assert total_batch_size % (B * T * ddp_world_size) == 0 # make sure you can divide the total_batch_size by B*T*ddp_world_size
 grad_accum_steps = total_batch_size // (B * T * ddp_world_size) 
 if master_process:
     print(f"total desired batch size: {total_batch_size}")
     print(f"=> calculated gradient accumation steps: {grad_accum_steps}")
-
-print(f"I am GPU {ddp_rank}")
-print("bye")
-sys.exit(0)
 
 train_loader = DataLoader(B=8, T=1024)
 
@@ -398,6 +396,9 @@ torch.set_float32_matmul_precision("high")
 model = GPT(GPTConfig())
 model.to(device)
 model = torch.compile(model)
+if ddp:
+    model = DDP(model, device_ids=[ddp_local_rank])
+raw_model = model.module if ddp else model # always contains the "raw" unwrapped model
 
 max_lr = 3e-4
 min_lr = max_lr * 0.1
@@ -423,7 +424,7 @@ def get_lr(it):
 
 # optimizing
 # lr=3e-4 is good for debugging
-optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device)
+optimizer = raw_model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device)
 
 for step in range(max_steps):
     t0 = time.time()
@@ -440,7 +441,13 @@ for step in range(max_steps):
             logits, loss = model(x, y)
         loss = loss / grad_accum_steps
         loss_accum += loss.detach()
+        if ddp:
+            # hacky solution here
+            model.require_backward_grad_sync = (micro_step == grad_accum_steps - 1)
         loss.backward() # accumulates gradient
+    if ddp:
+        # loss_accum averaged on all ranks
+        dist.all_reduce(loss_accum, op=dist.ReduceOp.AVG)
     norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # stop model shock, limit gradient to 1.0.
     lr = get_lr(step)
     for param_group in optimizer.param_groups:
@@ -453,9 +460,13 @@ for step in range(max_steps):
     dt = (t1 - t0)*1000
 
     # token count
-    tokens_processed = train_loader.B * train_loader.T * grad_accum_steps
+    tokens_processed = train_loader.B * train_loader.T * grad_accum_steps * ddp_world_size
     tokens_per_sec = tokens_processed / dt
-    print(f"step {step} | loss: {loss_accum.item():.6f} | norm: {norm:.4f} | dt: {dt:.2f}ms | tok/sec: {tokens_per_sec:.2f}")
+    if master_process:
+        print(f"step {step} | loss: {loss_accum.item():.6f} | norm: {norm:.4f} | dt: {dt:.2f}ms | tok/sec: {tokens_per_sec:.2f}")
+
+if ddp:
+    destroy_process_group()
 
 import sys; sys.exit(0)
 

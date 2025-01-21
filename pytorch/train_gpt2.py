@@ -391,8 +391,7 @@ model.to(device)
 model = torch.compile(model)
 if ddp:
     model = DDP(model, device_ids=[ddp_local_rank])
-raw_model = model.module if ddp else model
-    
+raw_model = model.module if ddp else model # always contains the "raw" unwrapped model
 
 max_lr = 3e-4
 min_lr = max_lr * 0.1
@@ -457,6 +456,7 @@ for step in range(max_steps):
     tokens_processed = train_loader.B * train_loader.T * grad_accum_steps * ddp_world_size
     tokens_per_sec = tokens_processed / dt
     if master_process:
+        print(f"step {step:4d} | loss: {loss_accum.item():.6f} | lr {lr:.4e} | norm: {norm:.4f} | dt: {dt*1000:.2f}ms | tok/sec: {tokens_per_sec:.2f}")
         print(f"step {step:4d} | loss: {loss_accum.item():.6f} | lr {lr:.4e} | norm: {norm:.4f} | dt: {dt*1000:.2f}ms | tok/sec: {tokens_per_sec:.2f}")
 
 if ddp:

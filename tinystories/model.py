@@ -11,61 +11,8 @@ from torch.nn import functional as F
 from transformers import GPT2LMHeadModel
 
 
-class CausalSelfAttention(nn.Module):
-
-    def __init__(self, config):
-        super().__init__()
-        assert config.n_embd % config.n_head == 0
-
-        # key, query and value projections for all heads but in a batch
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
-
-        # Output projection
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd)
-        self.c_proj.NANOGPT_SCALE_INIT = 1
-
-        # regularization
-        self.n_head = config.n_head
-        self.n_embd = config.n_embd
-
-        # Causal mask (lower triangular)
-        self.register_buffer(
-            "bias",
-            torch.tril(torch.ones(config.block_size, config.block_size)).view(
-                1, 1, config.block_size, config.block_size
-            ),
-        )
-    
-
-    def forward(self, x):
-        """
-        Method of multi-head self attention in a single pass
-        """
-
-        B, T, C = x.size()
-        qkv = self.c_attn(
-            x
-        )  # Create query, key, value vectors via projecting linear layer
-        q, k, v = qkv.split(
-            self.n_embd, dim=2
-        )  # torch.split: split tensor by which dimension
-
-        # Shaping q, v, t to (B, T, nh, C // nh)
-        # transpose(1, 2) swaps the T and
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
-        
-        # flash attention 
-        y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
-        # re-assemble all head outputs side by side
-        y = y.transpose(1, 2).contiguous().view(B, T, C)
-
-        y = self.c_proj(y)
-        return y
-
 class LocalCausalSelfAttention(nn.Module):
-    def __init__(self, config, window_size=256):
+    def __init__(self, config, attention_type):
         super().__init__()
         assert config.n_embd % config.n_head == 0
 
@@ -83,11 +30,17 @@ class LocalCausalSelfAttention(nn.Module):
         # size of window for tinystories
         self.window_size = window_size
 
-                # Create a combined causal and local attention mask
-        self.register_buffer(
-            "bias",
-            self._create_combined_mask(config.block_size, window_size),
+        bias = torch.tril(torch.ones((max_positions, max_positions), dtype=bool)).view(
+            1, 1, config.block_size, config.block_size
         )
+
+        # local causal self attention is a sliding window where each token can only attend to the previous
+        # window_size tokens. This is implemented by updating the causal mask such that for each token
+        # all other tokens are masked except the previous window_size tokens.
+        if attention_type == "local":
+            bias = torch.bitwise_xor(bias, torch.tril(bias, -config.window_size))
+            
+        self.register_buffer("bias", bias)
 
     def _create_combined_mask(self, block_size, window_size):
         """
@@ -128,7 +81,7 @@ class LocalCausalSelfAttention(nn.Module):
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         
-        # flash attention 
+        # flash attention w/ local causal attention mask
         y = F.scaled_dot_product_attention(q, k, v, attn_mask=self.bias[:, :, :T, :T] == 0)
         # re-assemble all head outputs side by side
         y = y.transpose(1, 2).contiguous().view(B, T, C)
@@ -169,7 +122,7 @@ class Block(nn.Module):
 
 
 @dataclass
-class GPTConfig:
+class TinyStoriesConfig:
     # tiny stories context length (block size)
     block_size: int = 512
     vocab_size: int = 50257
@@ -177,9 +130,11 @@ class GPTConfig:
     n_layer: int = 1
     n_head: int = 12
     n_embd: int = 768
+    # for local attention
+    window_size: int = 256 
 
 
-class GPT(nn.Module):
+class GPTNeo(nn.Module):
 
     def __init__(self, config):
         super().__init__()

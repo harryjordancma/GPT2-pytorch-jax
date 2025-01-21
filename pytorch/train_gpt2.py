@@ -1,6 +1,7 @@
 import math
 import os
 import tiktoken
+import inspect 
 import torch
 import sys
 import torch.nn as nn
@@ -286,15 +287,7 @@ class GPT(nn.Module):
         print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,}  parameters")
         print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,}  parameters")
         # Create AdamW optimizer and use the fused version if it is available
-        fused_available = False
-
-        # python 3.12 hack, kernel fussion for AdamW
-        # try:
-        #     torch.optim.AdamW([], fused=True)  # Test with an empty parameter list
-        #     fused_available = True
-        # except TypeError:
-        #     fused_available = False
-        fused_available = True
+        fused_available = "fused" in inspect.signature(torch.optim.AdamW).parameters
         used_fused = fused_available and "cuda" in device
         print(f"using fused AdamW: {used_fused}")
         optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8, fused=used_fused)
@@ -378,7 +371,7 @@ if torch.cuda.is_available():
 device_type = "cuda" if device.startswith("cuda") else "cpu"
 
 total_batch_size = 524288 # 2**19, roughly 0.5 M of tokens
-B = 4 # micro batch size
+B = 16 # micro batch size
 T = 1024 # sequence 
 
 assert total_batch_size % (B * T * ddp_world_size) == 0 # make sure you can divide the total_batch_size by B*T*ddp_world_size
@@ -387,7 +380,7 @@ if master_process:
     print(f"total desired batch size: {total_batch_size}")
     print(f"=> calculated gradient accumation steps: {grad_accum_steps}")
 
-train_loader = DataLoader(B=8, T=1024)
+train_loader = DataLoader(B=B, T=T)
 
 # high = tf_32, setting all matrix multipication to utlize tf32 precision
 torch.set_float32_matmul_precision("high")
@@ -398,7 +391,8 @@ model.to(device)
 model = torch.compile(model)
 if ddp:
     model = DDP(model, device_ids=[ddp_local_rank])
-raw_model = model.module if ddp else model # always contains the "raw" unwrapped model
+raw_model = model.module if ddp else model
+    
 
 max_lr = 3e-4
 min_lr = max_lr * 0.1
@@ -457,13 +451,13 @@ for step in range(max_steps):
     # wait for all the work to finish.
     torch.cuda.synchronize()
     t1 = time.time()
-    dt = (t1 - t0)*1000
+    dt = (t1 - t0)
 
     # token count
     tokens_processed = train_loader.B * train_loader.T * grad_accum_steps * ddp_world_size
     tokens_per_sec = tokens_processed / dt
     if master_process:
-        print(f"step {step} | loss: {loss_accum.item():.6f} | norm: {norm:.4f} | dt: {dt:.2f}ms | tok/sec: {tokens_per_sec:.2f}")
+        print(f"step {step:4d} | loss: {loss_accum.item():.6f} | lr {lr:.4e} | norm: {norm:.4f} | dt: {dt*1000:.2f}ms | tok/sec: {tokens_per_sec:.2f}")
 
 if ddp:
     destroy_process_group()

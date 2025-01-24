@@ -15,9 +15,11 @@
 # %%
 import pandas as pd
 import warnings
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
+from datetime import datetime
 # Suppress FutureWarning messages
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -40,7 +42,19 @@ def preprocessing(df, remove_date=False):
     df['date'] = pd.to_datetime(df['date'])
     df['year'] = df['date'].dt.year
     df['month'] = df['date'].dt.month
+
+    # Feature engineering
+    df["month_sin"] = np.sin(df['month'] * (2 * np.pi / 12))
+    df["month_cos"] = np.cos(df['month'] * (2 * np.pi / 12))
+    
     df['day'] = df['date'].dt.day
+    df["day_of_week"] = df["date"].dt.dayofweek
+    df["day_of_year"] = df['date'].apply(
+        lambda x: x.timetuple().tm_yday if not (x.is_leap_year and x.month > 2) else x.timetuple().tm_yday - 1
+    )
+    important_dates = [1,2,3,4,5,6,7,8,9,10,99, 100, 101, 125,126,355,256,357,358,359,360,361,362,363,364,365]
+    df["important_dates"] = df["day_of_year"].apply(lambda x: x if x in important_dates else 0)
+    
 
     # Drop unnecessary columns
     if remove_date:
@@ -52,11 +66,6 @@ def preprocessing(df, remove_date=False):
     df = pd.get_dummies(df, columns=['country', 'store', 'product'], drop_first=True)
 
     return df
-
-
-# %%
-df_p = preprocessing(train_data)
-df_p.head(3)
 
 
 # %%
@@ -85,17 +94,33 @@ def test_train_split(df, test_size=0.2):
 
 
 # %%
-X_train, X_test, y_train, y_test = test_train_split(df_p, test_size=0.2)
-
-
-# %%
-def train_model(X_train, X_test, y_train):
+def fit_model(X_train, X_test, y_train):
     # Initialize and train the linear regression model
     model = LinearRegression()
     model.fit(X_train, y_train)
 
+    return model
+
+
+# %%
+def fit_model(X_train, y_train):
+    # Initialize and train the linear regression model
+    model = LinearRegression()
+    model.fit(X_train, y_train)
+
+    return model
+
+
+# %%
+def model_predict(model, X_test):
     # Make predictions
     y_pred = model.predict(X_test)
+
+    # Convert predictions to integers
+    y_pred = np.round(y_pred).astype(int)  # Round to nearest integer and convert to int
+
+    # Clip negative values to zero
+    y_pred = np.clip(y_pred, 0, None)  # Set all values less than 0 to 0
 
     return y_pred
 
@@ -112,14 +137,9 @@ def eval_model(y_test, y_pred):
 # %%
 df_pre = preprocessing(train_data)
 X_train, X_test, y_train, y_test = test_train_split(df_pre)
-y_pred = train_model(X_train, X_test, y_train)
+model = fit_model(X_train, y_train)
+y_pred = model_predict(model, X_test)
 eval_model(y_test, y_pred)
-
-# %%
-X_train
-
-# %%
-X_test
 
 # %%
 # Plot actual vs. predicted values
@@ -142,24 +162,25 @@ def run_model_on_test(train_data, test_data, save_path="submission.csv"):
 
     X = train_data_pp.drop(columns=['num_sold', 'date'])
     y = train_data_pp['num_sold']
-    model = LinearRegression()
-    model.fit(X, y)
+    model = fit_model(X, y)
+    y_pred = model_predict(model, test_data_pp)
 
-    # Make predictions
-    y_pred = model.predict(test_data_pp)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")  # Format: YYYYMMDD_HHMMSS
+    # Append the timestamp to the save_path
+    save_path_with_timestamp = f"{save_path}_{timestamp}.csv"
 
     submission = pd.DataFrame(data={'num_sold': y_pred}, index=test_data["id"])
     if save_path:
-        submission.to_csv(save_path)
+        submission.to_csv(save_path_with_timestamp)
     return submission
     
 
     
 
 # %%
-run_model_on_test(train_data, test_data)
+submission = run_model_on_test(train_data, test_data)
 
 # %%
-test_data['id']
+submission
 
 # %%

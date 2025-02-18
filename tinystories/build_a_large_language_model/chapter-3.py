@@ -7,9 +7,9 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.16.4
 #   kernelspec:
-#     display_name: Python 3.11 Transformers
+#     display_name: Python 3.11
 #     language: python
-#     name: py311_transformers
+#     name: py311
 # ---
 
 # %% [markdown]
@@ -135,9 +135,6 @@ value_2 = x_2 @ W_value
 print(query_2)
 
 # %%
-keys
-
-# %%
 # computing all keys and values
 keys = inputs @ W_key
 values = inputs @ W_value
@@ -197,4 +194,117 @@ torch.manual_seed(123)
 sa_v1 = SelfAttention_v1(d_in, d_out)
 print(sa_v1(inputs))
 
+
 # %%
+# Using nn.Linear instead of random nn.Parameter as has a more optimized weight initializiation scheme
+class SelfAttention_v2(nn.Module):
+    def __init__(self, d_in, d_out, qkv_bias=False):
+        super().__init__()
+        self.W_query = nn.Linear(d_in, d_out, bias=qkv_bias)
+        self.W_key = nn.Linear(d_in, d_out, bias=qkv_bias)
+        self.W_value = nn.Linear(d_in, d_out, bias=qkv_bias)
+
+    def forward(self, x):
+        keys = self.W_key(x)
+        queries = self.W_query(x)
+        values = self.W_value(x)
+        attn_scores = queries @ keys.T
+        attn_weights = torch.softmax(
+            attn_scores / keys.shape[-1]**0.5, dim=-1
+        )
+        context_vec = attn_weights @ values
+        return context_vec
+        
+
+
+# %%
+# Using SelfAttention_v2
+torch.manual_seed(789)
+sa_v2 = SelfAttention_v2(d_in, d_out)
+print(sa_v2(inputs))
+
+# %% [markdown]
+# #### Exercise 3.1 - Transfering weights
+
+# %%
+# Assigning weights
+sa_v1.W_key = torch.nn.Parameter(sa_v2.W_key.weight.T)
+sa_v1.W_query = torch.nn.Parameter(sa_v2.W_query.weight.T)
+sa_v1.W_value = torch.nn.Parameter(sa_v2.W_value.weight.T)
+
+# %%
+# Confirming output is the same
+sa_v1(inputs)
+
+# %% [markdown]
+# ## 3.5 Hiding words with causal attention
+
+# %%
+# Calculate attention weights as before
+queries = sa_v2.W_query(inputs)
+keys = sa_v2.W_key(inputs)
+attn_scores = queries @ keys.T
+attn_weights = torch.softmax(attn_scores / keys.shape[-1]**0.5, dim=-1)
+print(attn_weights)
+
+# %%
+# Creating mask wher values above diagonal are zero
+context_length = attn_scores.shape[0]
+mask_simple = torch.tril(torch.ones(context_length, context_length))
+print(mask_simple)
+
+# %%
+# multiply mask w/ attention weights
+masked_simple = attn_weights * mask_simple
+print(masked_simple)
+
+# %% [markdown]
+# Applying the softmax before will cause info leakage, however if the result is renormalised, the original softmax wont effect anything. 
+
+# %%
+# renormalise the attention weights to sum up to 1 by dividing by the sum
+row_sums = masked_simple.sum(dim=-1, keepdim=True)
+masked_simple_norm = masked_simple / row_sums
+print(masked_simple_norm)
+
+# %% [markdown]
+# #### More efficient masking using softmax property
+# We wont need to renormalise if we apply the mask to the scores then use the softmax to mask.
+
+# %%
+# Make this more efficient using softmax property
+mask = torch.triu(torch.ones(context_length, context_length), diagonal=1)
+masked = attn_scores.masked_fill(mask.bool(), -torch.inf)
+print(masked)
+
+# %%
+# applying the softmax now will cause the inf to go to 0
+attn_weights = torch.softmax(masked / keys.shape[-1]**0.5, dim=1)
+print(attn_weights)
+
+# %% [markdown]
+# ### 3.5.2 Masking additional attnetion weights w/ dropout
+
+# %%
+# Using dropout to prevent overfitting
+torch.manual_seed(123)
+dropout = torch.nn.Dropout(0.5)
+example = torch.ones(6, 6)
+print(dropout(example))
+
+# %% [markdown]
+# Values are scaled up from 1 to 2 (1/0.5 = 2). This is done to maintain balance during both training and inference
+
+# %%
+# Applying dropout to weight matrix
+torch.manual_seed(123)
+print(dropout(attn_weights))
+
+# %% [markdown]
+# ### 3.5.3 Implementing a compact causal attention class
+#
+
+# %%
+# simulate batch of inputs
+batch = torch.stack((inputs, inputs), dim=0)
+print(batch.shape)

@@ -115,6 +115,9 @@ d_in = inputs.shape[1] # input dimensions
 d_out = 2 # output dimensions
 
 # %%
+inputs
+
+# %%
 # initialize weight matrices, grad set to false for example purposes
 torch.manual_seed(123)
 W_query = torch.nn.Parameter(torch.rand(d_in, d_out), requires_grad=False)
@@ -122,11 +125,17 @@ W_key = torch.nn.Parameter(torch.rand(d_in, d_out), requires_grad=False)
 W_value = torch.nn.Parameter(torch.rand(d_in, d_out), requires_grad=False)
 
 # %%
+W_key
+
+# %%
 # computer query, key and value vectors
 query_2 = x_2 @ W_query
 key_2 = x_2 @ W_key
 value_2 = x_2 @ W_value
 print(query_2)
+
+# %%
+keys
 
 # %%
 # computing all keys and values
@@ -147,4 +156,45 @@ attn_scores_2 = query_2 @ keys.T
 print(attn_scores_2)
 
 # %%
-# calculate attention weights by sc
+# calculate attention weights by dividing the them by the sqrt of the embedding dimensions
+d_k = keys.shape[-1]
+attn_weights_2 = torch.softmax(attn_scores_2 / d_k**0.5, dim=-1)
+print(attn_weights_2)
+
+# %%
+# calculate context vector for 2nd input vector
+context_vec_2 = attn_weights_2 @ values
+print(context_vec_2)
+
+# %% [markdown]
+# ## 3.4.2 Implementing a compact self-attention python class
+
+# %%
+# First version of the self attention class
+import torch.nn as nn
+class SelfAttention_v1(nn.Module):
+    def __init__(self, d_in, d_out):
+        super().__init__()
+        self.W_query = nn.Parameter(torch.rand(d_in, d_out))
+        self.W_key = nn.Parameter(torch.rand(d_in, d_out))
+        self.W_value = nn.Parameter(torch.rand(d_in, d_out))
+
+    def forward(self, x):
+        keys = x @ self.W_key
+        queries = x @ self.W_query
+        values = x @ self.W_value
+        attn_scores = queries @ keys.T # omega
+        attn_weights = torch.softmax(
+            attn_scores / keys.shape[-1]**0.5, dim=-1
+        )
+        context_vec = attn_weights @ values
+        return context_vec
+
+
+# %%
+# Using class
+torch.manual_seed(123)
+sa_v1 = SelfAttention_v1(d_in, d_out)
+print(sa_v1(inputs))
+
+# %%

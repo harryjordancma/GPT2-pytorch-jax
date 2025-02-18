@@ -81,3 +81,70 @@ for i, x_i in enumerate(inputs):
 print(attn_scores)
 
 # %%
+# for loops are slow, using matrix multipication
+attn_scores = inputs @ inputs.T
+print(attn_scores)
+
+# %%
+# normalise each row so that the values in each row sum to 1
+attn_weights = torch.softmax(attn_scores, dim=-1)
+print(attn_weights)
+
+# %%
+# verify row_2 sums up to 1
+row_2_sum = sum([0.1385, 0.2379, 0.2333, 0.1240, 0.1082, 0.1581])
+print("Row 2 sum:", row_2_sum)
+print("All row sums:", attn_weights.sum(dim=-1))
+
+# %%
+# calculate context vectors for all rows
+all_context_vecs = attn_weights @ inputs
+print(all_context_vecs)
+
+# %%
+# comparing both context calculated by both individual and all
+print("Previous 2nd context vector:", context_vec_2)
+
+# %% [markdown]
+# ## 3.4 Implementing self-attention with trainable weights
+
+# %%
+# define variables
+x_2 = inputs[1] # second input vector
+d_in = inputs.shape[1] # input dimensions
+d_out = 2 # output dimensions
+
+# %%
+# initialize weight matrices, grad set to false for example purposes
+torch.manual_seed(123)
+W_query = torch.nn.Parameter(torch.rand(d_in, d_out), requires_grad=False)
+W_key = torch.nn.Parameter(torch.rand(d_in, d_out), requires_grad=False)
+W_value = torch.nn.Parameter(torch.rand(d_in, d_out), requires_grad=False)
+
+# %%
+# computer query, key and value vectors
+query_2 = x_2 @ W_query
+key_2 = x_2 @ W_key
+value_2 = x_2 @ W_value
+print(query_2)
+
+# %%
+# computing all keys and values
+keys = inputs @ W_key
+values = inputs @ W_value
+print("keys.shape:", keys.shape)
+print("values.shape", values.shape)
+
+# %%
+# Compute attention score for 2nd input vector
+keys_2 = keys[1]
+attn_scores_22 = query_2.dot(keys_2)
+print(attn_scores_22)
+
+# %%
+# calculate attention scores via matrix multiplication
+attn_scores_2 = query_2 @ keys.T
+print(attn_scores_2)
+
+# %%
+# calculate attention weights by sc

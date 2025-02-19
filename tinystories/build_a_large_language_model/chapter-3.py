@@ -378,3 +378,36 @@ class MultiHeadAttentionWrapper(nn.Module):
         
 
 # %%
+# Using multihead attention wrapper class
+torch.manual_seed(123)
+context_length = batch.shape[1] # number of tokens
+print(f"Number of tokens")
+d_in, d_out = 3, 2
+
+# %%
+mha = MultiHeadAttentionWrapper(
+    d_in, d_out, context_length, 0.0, num_heads=2)
+context_vecs = mha(batch)
+
+print(context_vecs)
+print("context_vecs.shape:", context_vecs.shape)
+
+# %% [markdown]
+# #### Example 3.2 Returning two-dimensional emebdding vectors
+
+# %%
+context_length
+
+# %%
+d_in, d_out = 3, 2
+mha = MultiHeadAttentionWrapper(
+    d_in, d_out, context_length, 0.0, num_heads=2)
+context_vecs = mha(batch)
+
+print(context_vecs)
+print("context_vecs.shape:", context_vecs.shape)
+
+# %%
+context_length
+
+# %%

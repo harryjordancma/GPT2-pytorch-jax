@@ -7,9 +7,9 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.16.4
 #   kernelspec:
-#     display_name: Python 3.11
+#     display_name: Python 3.12
 #     language: python
-#     name: py311
+#     name: py312
 # ---
 
 # %% [markdown]
@@ -283,7 +283,7 @@ attn_weights = torch.softmax(masked / keys.shape[-1]**0.5, dim=1)
 print(attn_weights)
 
 # %% [markdown]
-# ### 3.5.2 Masking additional attnetion weights w/ dropout
+# ### 3.5.2 Masking additional attention weights w/ dropout
 
 # %%
 # Using dropout to prevent overfitting
@@ -308,3 +308,14 @@ print(dropout(attn_weights))
 # simulate batch of inputs
 batch = torch.stack((inputs, inputs), dim=0)
 print(batch.shape)
+
+
+# %%
+# Creating causal attention class
+class CausalAttention(nn.Module):
+    def __init__(self, d_in, d_out, context_length, dropout, qkv_bias=False):
+        super().__init__()
+        self.d_out = d_out
+        self.W_query = nn.Linear
+
+# %%
